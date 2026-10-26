@@ -7,7 +7,8 @@
 
 ## 窗口
 
-- Finder 的 cmd + e 和 Del 映射已停用：排查 Ctrl/Command 对调冲突及误删，暂勿启用。
+- `finder.lua`：option + e 在 Finder 中打开主目录 `~`。
+- `finder_trash.lua`：Finder 中单按 Del，松键时调用“移到废纸篓”菜单；不合成修饰键，不检查输入框或焦点。
 - cmd + m：最小化当前窗口；再按一次恢复并聚焦该窗口（即使焦点已切换）。
 
 ## PowerPoint
