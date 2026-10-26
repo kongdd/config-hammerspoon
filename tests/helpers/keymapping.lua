@@ -4,8 +4,12 @@ return function()
         keyDown = 1, keyUp = 2, flagsChanged = 3,
         leftMouseDown = 4, rightMouseDown = 5, otherMouseDown = 6, scrollWheel = 7,
     }
-    local map = { a = 0, b = 11, e = 14, cmd = 55, shift = 56, alt = 58, ctrl = 59 }
-    local taps, queue, now = {}, {}, 0
+    local map = {
+        a = 0, b = 11, e = 14, delete = 51, forwarddelete = 117,
+        cmd = 55, shift = 56, alt = 58, ctrl = 59,
+    }
+    local taps = setmetatable({}, { __mode = "v" }) -- 不替生产模块持有监听器，保留 GC 测试意义。
+    local queue, now = {}, 0
     local state = { front = "com.apple.finder", posted = {}, errors = {} }
     local methods = {}
     function methods:containExactly(modifiers)
@@ -80,6 +84,7 @@ return function()
         end
         return false
     end
+    function state.advance(seconds) now = now + seconds end
     function state.send(kind, code, flags, raw) return dispatch(event(kind, code, flags, raw)) end
     function state.flush()
         local count = 0

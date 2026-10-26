@@ -29,6 +29,10 @@ assert(trash.action == "cmd+backspace" and trash.options == "com.apple.finder")
 assert(apps.action == hs.application.launchOrFocus)
 assert(apps.options.args[1] == "/System/Applications/Apps.app")
 assert(apps.options.bundleID_excluded[1] == "com.microsoft.rdc.macos")
+local refresh = mappings.f5
+assert(refresh.action == "cmd+r" and refresh.options == "com.google.Chrome")
+local downloads = mappings["cmd+j"]
+assert(downloads.action == "cmd+shift+j" and downloads.options == "com.google.Chrome")
 -- F11 仅注册到 Windows App；切换全屏，无窗口时安全返回。
 local fullscreen, toggles = true, 0
 local window = {

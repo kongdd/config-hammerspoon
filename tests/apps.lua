@@ -1,54 +1,18 @@
--- 无需启动 Hammerspoon：luajit ~/.hammerspoon/tests/apps.lua
-local callback, now, launches, front = nil, 0, 0, "com.apple.finder"
-local types = {
-    flagsChanged = 1, keyDown = 2, keyUp = 3,
-    leftMouseDown = 4, rightMouseDown = 5, otherMouseDown = 6, scrollWheel = 7,
-}
-hs = {
-    keycodes = { map = { alt = 58 } },
-    timer = { secondsSinceEpoch = function() return now end },
-    application = {
-        frontmostApplication = function()
-            if front then return { bundleID = function() return front end } end
-        end,
-        launchOrFocus = function(path)
-            assert(path == "/System/Applications/Apps.app")
-            launches = launches + 1
-        end,
-    },
-    eventtap = {
-        event = {
-            types = types,
-            properties = { eventSourceUserData = 1 },
-            rawFlagMasks = require("tests.helpers.keyflags"),
-        },
-        new = function(events, fn)
-            assert(#events == 7)
-            callback = fn
-            return { start = function(self) return self end }
-        end,
-    },
-}
-require("keymapping")("alt", hs.application.launchOrFocus, {
+-- 无需启动 Hammerspoon：luajit tests/apps.lua
+local test = require("tests.helpers.keymapping")()
+local launches = 0
+hs.application.launchOrFocus = function(path)
+    assert(path == "/System/Applications/Apps.app")
+    launches = launches + 1
+end
+test.bind("alt", hs.application.launchOrFocus, {
     args = { "/System/Applications/Apps.app" },
     bundleID_excluded = { "com.microsoft.rdc.macos" },
 })
 assert(launches == 0, "注册时不得执行动作")
-local flagMethods = {}
-function flagMethods:containExactly(modifiers)
-    assert(#modifiers == 0, "单按修饰键不允许其他修饰键")
-    return not next(self)
-end
 
 local function send(kind, code, flags)
-    now = now + 0.05
-    assert(callback({
-        getType = function() return types[kind] end,
-        getProperty = function() return 0 end,
-        rawFlags = function() return 0 end,
-        getKeyCode = function() return code or 58 end,
-        getFlags = function() return setmetatable(flags or {}, { __index = flagMethods }) end,
-    }) == false, "所有事件必须放行")
+    assert(not test.send(kind, code or 58, flags), "所有事件必须放行")
 end
 local function press(flags) send("flagsChanged", 58, flags or { alt = true }) end
 local function release(flags) send("flagsChanged", 58, flags) end
@@ -58,16 +22,16 @@ release()
 assert(launches == 1)
 
 -- Windows App 排除；切换至 Windows App 时也不得触发。
-front = "com.microsoft.rdc.macos"
+test.front = "com.microsoft.rdc.macos"
 press()
 release()
 assert(launches == 1)
-front = "com.apple.finder"
+test.front = "com.apple.finder"
 press()
-front = "com.microsoft.rdc.macos"
+test.front = "com.microsoft.rdc.macos"
 release()
 assert(launches == 1)
-front = "com.apple.finder"
+test.front = "com.apple.finder"
 
 -- Option+C 等组合键，以及其他修饰键先后按下，均不触发。
 press()
@@ -96,7 +60,7 @@ end
 
 -- 长按、孤立松键、右 Option 均不触发。
 press()
-now = now + 1.1
+test.advance(1.1)
 release()
 release()
 send("flagsChanged", 61, { alt = true })
@@ -126,7 +90,7 @@ send("keyUp", 58)
 assert(launches == 4)
 
 -- 无前台应用时仍可使用。
-front = nil
+test.front = nil
 press()
 release()
 assert(launches == 5)
@@ -143,4 +107,5 @@ assert(launches == 5)
 press()
 release()
 assert(launches == 6)
+assert(#test.errors == 0)
 print("apps: 全部测试通过")
