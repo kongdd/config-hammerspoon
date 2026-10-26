@@ -2,18 +2,32 @@
 local callback, front, trashes = nil, "com.apple.finder", 0
 hs = {
     keycodes = { map = { forwarddelete = 117, delete = 51, e = 14 } },
+    timer = { secondsSinceEpoch = function() return 0 end },
     application = { frontmostApplication = function()
         if front then return {
             bundleID = function() return front end,
         } end
     end },
     eventtap = {
-        keyStroke = function(modifiers, key, delay)
-            assert(#modifiers == 1 and modifiers[1] == "cmd")
-            assert(key == "delete" and delay == 0)
-            trashes = trashes + 1
-        end,
-        event = { types = { keyDown = 1, keyUp = 2 } },
+        event = {
+            types = { keyDown = 1, keyUp = 2 },
+            properties = { eventSourceUserData = 1 },
+            newKeyEvent = function(modifiers, key, down)
+                assert(#modifiers == 1 and modifiers[1] == "cmd" and key == "delete")
+                return {
+                    setProperty = function(self, property, value)
+                        assert(property == 1 and value == 0x4B4D4150)
+                        self.tagged = true
+                        return self
+                    end,
+                    post = function(self)
+                        assert(self.tagged, "合成按键必须携带标记")
+                        if not down then trashes = trashes + 1 end
+                        return self
+                    end,
+                }
+            end,
+        },
         new = function(events, fn)
             assert(#events == 2 and events[1] == 1 and events[2] == 2)
             callback = fn
@@ -41,6 +55,7 @@ local function sendEvent(kind, flags, expected, code)
     for modifier, value in pairs(flags or {}) do copy[modifier] = value end
     assert(callback({
         getType = function() return hs.eventtap.event.types[kind] end,
+        getProperty = function() return 0 end,
         getKeyCode = function() return code or 117 end,
         getFlags = function() return setmetatable(copy, { __index = flagMethods }) end,
     }) == expected)
@@ -118,7 +133,7 @@ sendEvent("keyDown", { ctrl = true }, false, 14)
 sendEvent("keyUp", {}, false, 14)
 sendEvent("keyDown", {}, true, 14)
 sendEvent("keyUp", { ctrl = true }, true, 14)
-assert(calls == before + 1)
+assert(calls == before + 2, "松开时的修饰键变化不得取消已匹配的按下")
 -- 直接传函数及多个参数，注册和按下均不执行，松键才调用。
 local argumentCalls = 0
 local function checkArgs(command, enabled)

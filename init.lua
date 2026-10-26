@@ -6,13 +6,13 @@ minimize = require("minimize")
 
 local keymapping = require("keymapping")
 
--- ⌥E：在 Finder 中打开主目录。
+-- Option + E：Finder Open Home
 keymapping("alt+e", hs.execute, { args = { "/usr/bin/open ~" } })
 
--- Finder 中将 Del 映射为 Cmd+Backspace（移到废纸篓）。
+-- Del       : Finder Cmd+Backspace（移到废纸篓）。
 keymapping("del", "cmd+backspace", "com.apple.finder")
 
--- 单按左 Option 打开 Apps；组合键放行，排除 Windows App。
+-- Option    : open apps，exclude `Windows App`
 keymapping("alt", hs.application.launchOrFocus, {
     args = { "/System/Applications/Apps.app" },
     bundleID_excluded = { "com.microsoft.rdc.macos" },

@@ -17,7 +17,7 @@ hs = {
         end,
     },
     eventtap = {
-        event = { types = types },
+        event = { types = types, properties = { eventSourceUserData = 1 } },
         new = function(events, fn)
             assert(#events == 7)
             callback = fn
@@ -40,6 +40,7 @@ local function send(kind, code, flags)
     now = now + 0.05
     assert(callback({
         getType = function() return types[kind] end,
+        getProperty = function() return 0 end,
         getKeyCode = function() return code or 58 end,
         getFlags = function() return setmetatable(flags or {}, { __index = flagMethods }) end,
     }) == false, "所有事件必须放行")
@@ -124,4 +125,17 @@ front = nil
 press()
 release()
 assert(launches == 5)
+-- 其他键先按住，再按 Option；无论谁先松开，都不是单按。
+send("keyDown", 14)
+press()
+release()
+send("keyUp", 14)
+send("keyDown", 14)
+press()
+send("keyUp", 14)
+release()
+assert(launches == 5)
+press()
+release()
+assert(launches == 6)
 print("apps: 全部测试通过")

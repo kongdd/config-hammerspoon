@@ -1,10 +1,19 @@
--- 快捷键写作 "ctrl+shift+a"；目标可为快捷键或回调，松键时触发。
+-- 快捷键写作 "ctrl+shift+a"；目标可为快捷键或函数，松键时触发。
 local aliases = { del = "forwarddelete", backspace = "delete" }
 local modifiers = { cmd = true, ctrl = true, alt = true, shift = true }
 local taps = {} -- 持有监听器，调用方无需保存返回值。
+local heldKeys, inputVersion = {}, 0 -- 共享按键状态，避免吞键导致单按误判。
+local synthetic = 0x4B4D4150 -- 标记合成事件，防止循环映射。
 local unpack = table.unpack or unpack
+local eventAPI = hs.eventtap.event
+local types, sourceProperty = eventAPI.types, eventAPI.properties.eventSourceUserData
+local keyEvents = { types.keyDown, types.keyUp }
+local modifierEvents = {
+    types.flagsChanged, types.keyDown, types.keyUp,
+    types.leftMouseDown, types.rightMouseDown, types.otherMouseDown, types.scrollWheel,
+}
 
--- 最后一项是主键，其余为修饰键；兼容大小写、空格和按键别名。
+-- 最后一项是主键；兼容大小写、空格和别名。
 local function parse(shortcut)
     local parts = {}
     for part in shortcut:lower():gsub("%s+", ""):gmatch("[^+]+") do
@@ -16,81 +25,108 @@ local function parse(shortcut)
     for _, modifier in ipairs(parts) do
         assert(modifiers[modifier], "未知修饰键：" .. modifier)
     end
-    return parts, key
+    return { key = key, code = hs.keycodes.map[key], modifiers = parts, single = modifiers[key] }
 end
 
--- options：args（回调参数）、bundleID、bundleID_excluded、timeout（单按默认 1 秒）。
+-- 将函数及参数、目标快捷键统一为可执行动作。
+local function makeAction(to, args)
+    if type(to) == "function" then
+        return function() to(unpack(args or {})) end
+    end
+    assert(type(to) == "string", "目标必须是快捷键或函数")
+    local target = parse(to)
+    return function()
+        for _, down in ipairs({ true, false }) do
+            eventAPI.newKeyEvent(target.modifiers, target.key, down)
+                :setProperty(sourceProperty, synthetic):post()
+        end
+    end
+end
+
+local function inApp(options)
+    if not options.bundleID and not options.bundleID_excluded then return true end
+    local app = hs.application.frontmostApplication()
+    local id = app and app:bundleID()
+    if options.bundleID and id ~= options.bundleID then return false end
+    for _, excluded in ipairs(options.bundleID_excluded or {}) do
+        if id == excluded then return false end
+    end
+    return true
+end
+
+-- 忽略合成事件；首次按下更新版本，重复通知不重复计数。
+local function readInput(event)
+    if event:getProperty(sourceProperty) == synthetic then return end
+    local kind, code = event:getType(), event:getKeyCode()
+    if kind == types.keyDown and not heldKeys[code] then
+        inputVersion = inputVersion + 1
+        heldKeys[code] = true
+    elseif kind == types.keyUp then
+        heldKeys[code] = nil
+    end
+    return kind, code, event:getFlags()
+end
+
+local function matches(source, kind, code, flags)
+    local keyboard = kind == types.flagsChanged or kind == types.keyDown or kind == types.keyUp
+    if not keyboard or code ~= source.code then return false end
+    flags.capslock = nil -- Caps Lock 不参与匹配；普通映射也忽略 Fn。
+    if source.single then
+        flags[source.key] = nil
+        for held in pairs(heldKeys) do
+            if held ~= source.code then return false end
+        end
+    else
+        flags.fn = nil
+    end
+    return flags:containExactly(source.modifiers)
+end
+
+-- 管理一次按下到松开的状态，普通键拦截，修饰键放行。
+local function makeHandler(source, action, options)
+    local pending -- nil：未按下；false：未匹配；table：已匹配，等待松键。
+    return function(event)
+        local kind, code, flags = readInput(event)
+        if not kind or (not source.single and code ~= source.code) then return false end
+        -- 实体修饰键用 flagsChanged，远程输入也可能使用 keyDown/keyUp。
+        local down = kind == types.keyDown or (kind == types.flagsChanged and flags[source.key])
+        local allowed = inApp(options)
+        local valid = allowed and matches(source, kind, code, flags)
+        if source.single and not valid then
+            if code == source.code and not down then
+                pending = nil
+            elseif pending ~= nil or code == source.code then
+                pending = false -- 取消后锁定，直到该修饰键真正松开。
+            end
+            return false
+        end
+        if down then
+            if pending == nil then
+                pending = valid and { time = hs.timer.secondsSinceEpoch(), version = inputVersion } or false
+            end
+            return not source.single and pending ~= false
+        end
+
+        -- 先清空再执行；只对单按检查中途操作及超时，不受普通组合键松键顺序影响。
+        local press = pending
+        pending = nil
+        if press and allowed and (not source.single or (press.version == inputVersion
+            and hs.timer.secondsSinceEpoch() - press.time <= (options.timeout or 1))) then
+            action()
+        end
+        return not source.single and not not press
+    end
+end
+
+-- options：args、bundleID、bundleID_excluded、timeout（单按默认 1 秒）。
 return function(from, to, options)
     if type(options) == "string" then options = { bundleID = options } end
     options = options or {}
-    local args = options.args or {}
-    local fromModifiers, key = parse(from)
-    local keyCode, singleModifier = hs.keycodes.map[key], modifiers[key]
-    assert(not singleModifier or #fromModifiers == 0, "修饰键单按不能附带其他修饰键")
-
-    -- 统一为回调，后续无需区分按键映射与自定义动作。
-    local action = to
-    if type(to) == "string" then
-        local toModifiers, toKey = parse(to)
-        action = function() hs.eventtap.keyStroke(toModifiers, toKey, 0) end
-    end
-    assert(type(action) == "function", "目标必须是快捷键或回调")
-
-    local types = hs.eventtap.event.types
-    -- 普通映射拦截按下和松开；单按修饰键还需监听中途操作，避免组合键误触发。
-    local events = { types.keyDown, types.keyUp }
-    if singleModifier then
-        events = {
-            types.flagsChanged, types.keyDown, types.keyUp,
-            types.leftMouseDown, types.rightMouseDown, types.otherMouseDown, types.scrollWheel,
-        }
-    end
-    local pressedAt, captured = nil, false
-    local tap = hs.eventtap.new(events, function(event)
-        local kind = event:getType()
-        if not singleModifier and event:getKeyCode() ~= keyCode then return false end
-        local keyboard = kind == types.flagsChanged or kind == types.keyDown or kind == types.keyUp
-        local flags = event:getFlags()
-        -- 实体修饰键产生 flagsChanged；远程注入也可能使用 keyDown/keyUp。
-        local down = kind == types.keyDown or (kind == types.flagsChanged and flags[key])
-        -- 忽略 Caps Lock；单按时去掉自身标志，普通映射则忽略 Fn。
-        flags.capslock = nil
-        if singleModifier then flags[key] = nil else flags.fn = nil end
-        local valid = keyboard and event:getKeyCode() == keyCode
-            and flags:containExactly(fromModifiers)
-        -- 指定应用与排除列表同时生效，按当前前台应用判断。
-        if valid and (options.bundleID or options.bundleID_excluded) then
-            local app = hs.application.frontmostApplication()
-            local id = app and app:bundleID()
-            valid = not options.bundleID or id == options.bundleID
-            for _, excluded in ipairs(options.bundleID_excluded or {}) do
-                if id == excluded then valid = false end
-            end
-        end
-        if not singleModifier then
-            if down then
-                captured = captured or valid
-                return captured -- 吞掉按下及自动重复，松键时才执行动作。
-            end
-            local swallow = captured
-            captured = false
-            if swallow and valid then action(unpack(args)) end
-            return swallow -- 即使修饰键或前台应用已变，也要吞掉配对的松键。
-        end
-        if not valid then
-            pressedAt = nil -- 组合键、鼠标操作或排除应用均取消单按。
-        elseif down then
-            pressedAt = pressedAt or hs.timer.secondsSinceEpoch() -- 重复按下不重置计时。
-        else
-            -- 仅在超时前完整单按才触发；先清空状态，避免重复松键再次执行。
-            local start = pressedAt
-            pressedAt = nil
-            if start and hs.timer.secondsSinceEpoch() - start <= (options.timeout or 1) then
-                action(unpack(args))
-            end
-        end
-        return false -- 修饰键事件始终放行。
-    end):start()
+    local source = parse(from)
+    assert(not source.single or #source.modifiers == 0, "修饰键单按不能附带其他修饰键")
+    local action = makeAction(to, options.args)
+    local events = source.single and modifierEvents or keyEvents
+    local tap = hs.eventtap.new(events, makeHandler(source, action, options)):start()
     taps[#taps + 1] = tap
     return tap
 end
