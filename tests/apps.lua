@@ -25,13 +25,23 @@ hs = {
         end,
     },
 }
-dofile(os.getenv("HOME") .. "/.hammerspoon/apps.lua")
+require("keymapping")("alt", hs.application.launchOrFocus, {
+    args = { "/System/Applications/Apps.app" },
+    bundleID_excluded = { "com.microsoft.rdc.macos" },
+})
+assert(launches == 0, "注册时不得执行动作")
+local flagMethods = {}
+function flagMethods:containExactly(modifiers)
+    assert(#modifiers == 0, "单按修饰键不允许其他修饰键")
+    return not next(self)
+end
+
 local function send(kind, code, flags)
     now = now + 0.05
     assert(callback({
         getType = function() return types[kind] end,
         getKeyCode = function() return code or 58 end,
-        getFlags = function() return flags or {} end,
+        getFlags = function() return setmetatable(flags or {}, { __index = flagMethods }) end,
     }) == false, "所有事件必须放行")
 end
 local function press(flags) send("flagsChanged", 58, flags or { alt = true }) end

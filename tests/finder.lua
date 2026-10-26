@@ -11,7 +11,13 @@ hs = {
         calls = calls + 1
     end,
 }
-dofile(os.getenv("HOME") .. "/.hammerspoon/finder.lua")
+local trash = {}
+package.loaded.keymapping = function(from, to, bundleID)
+    assert(from == "del" and to == "cmd+backspace" and bundleID == "com.apple.finder")
+    return trash
+end
+local bindings = dofile(os.getenv("HOME") .. "/.hammerspoon/finder.lua")
+assert(bindings.home and bindings.trash == trash, "两项绑定均须保留引用")
 callback()
 assert(calls == 1)
 print("finder: Option+E 打开主目录测试通过")
