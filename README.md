@@ -12,6 +12,7 @@
 - `keymapping.lua`：`keymapping("ctrl+shift+a", "cmd+b", options)`；目标也可为回调。`options` 支持 `bundleID`、`bundleID_excluded` 列表、修饰键单按的 `timeout`（默认 1 秒）；兼容第三参数直接传 `bundleID`，省略则全局生效。
 - cmd + m：最小化当前窗口；再按一次恢复并聚焦该窗口（即使焦点已切换）。
 - Windows App 中按 F11：切换远程窗口全屏，再按一次恢复。
+- option + d：显示系统桌面，再按一次恢复之前的窗口。
 
 ## PowerPoint
 

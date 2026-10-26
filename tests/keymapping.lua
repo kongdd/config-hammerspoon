@@ -1,96 +1,5 @@
--- luajit tests/keymapping.lua；模拟事件回灌与多个监听器，不操作真实应用。
-local function setup()
-    local types = {
-        keyDown = 1, keyUp = 2, flagsChanged = 3,
-        leftMouseDown = 4, rightMouseDown = 5, otherMouseDown = 6, scrollWheel = 7,
-    }
-    local map = { a = 0, b = 11, e = 14, alt = 58 }
-    local taps, queue, posted, now = {}, {}, {}, 0
-    local state = { front = "com.apple.finder", posted = posted }
-    local methods = {}
-    function methods:containExactly(modifiers)
-        local required = {}
-        for _, modifier in ipairs(modifiers) do required[modifier] = true end
-        for modifier in pairs(self) do
-            if not required[modifier] then return false end
-        end
-        for modifier in pairs(required) do
-            if not self[modifier] then return false end
-        end
-        return true
-    end
-
-    local function event(kind, code, flags)
-        local properties = {}
-        return {
-            getType = function() return types[kind] end,
-            getKeyCode = function() return code end,
-            getProperty = function(_, property) return properties[property] or 0 end,
-            getFlags = function()
-                local copy = {}
-                for key, value in pairs(flags or {}) do copy[key] = value end
-                return setmetatable(copy, { __index = methods })
-            end,
-            setProperty = function(self, property, value)
-                properties[property] = value
-                return self
-            end,
-            post = function(self)
-                posted[#posted + 1] = self
-                queue[#queue + 1] = self
-                return self
-            end,
-        }
-    end
-
-    hs = {
-        keycodes = { map = map },
-        timer = { secondsSinceEpoch = function() return now end },
-        application = { frontmostApplication = function()
-            if state.front then return { bundleID = function() return state.front end } end
-        end },
-        eventtap = {
-            event = {
-                types = types,
-                properties = { eventSourceUserData = 1 },
-                newKeyEvent = function(modifiers, key, down)
-                    local flags = {}
-                    for _, modifier in ipairs(modifiers) do flags[modifier] = true end
-                    return event(down and "keyDown" or "keyUp", map[key], flags)
-                end,
-            },
-            new = function(events, callback)
-                local watched = {}
-                for _, kind in ipairs(events) do watched[kind] = true end
-                local tap = { watched = watched, callback = callback }
-                function tap:start() return self end
-                taps[#taps + 1] = tap
-                return tap
-            end,
-        },
-    }
-    -- 与 Hammerspoon 一致：后创建的监听器先处理，吞掉后不再向后传递。
-    local function dispatch(input)
-        now = now + 0.01
-        for i = #taps, 1, -1 do
-            local tap = taps[i]
-            if tap.watched[input:getType()] and tap.callback(input) then return true end
-        end
-        return false
-    end
-    function state.send(kind, code, flags) return dispatch(event(kind, code, flags)) end
-    function state.flush()
-        local count = 0
-        while #queue > 0 do
-            count = count + 1
-            assert(count <= 20, "合成按键不得无限回灌")
-            assert(not dispatch(table.remove(queue, 1)), "合成按键必须放行至应用")
-        end
-    end
-    package.loaded.keymapping = nil
-    state.bind = require("keymapping")
-    return state
-end
+-- luajit tests/keymapping.lua；不操作真实应用。
+local setup = require("tests.helpers.keymapping")
 
 -- 自身映射与循环映射：只发送一对目标事件，不触发其他映射。
 for _, cycle in ipairs({ false, true }) do
@@ -185,5 +94,66 @@ for _, kind in ipairs({ "flagsChanged", "keyDown" }) do
         test.send(release, 58)
         assert(calls == 1, "松开后必须恢复正常单按")
     end
+end
+-- 混合输入不依赖按下、松开通知的先后顺序；四种修饰键均须去重。
+local modifiers = {
+    { "cmd", 55, 54, "Command" }, { "shift", 56, 60, "Shift" },
+    { "alt", 58, 61, "Alternate" }, { "ctrl", 59, 62, "Control" },
+}
+local masks = require("tests.helpers.keyflags")
+for _, modifier in ipairs(modifiers) do
+    local name, left, right, suffix = unpack(modifier)
+    local leftMask, rightMask = masks["deviceLeft" .. suffix], masks["deviceRight" .. suffix]
+    for _, flagsFirst in ipairs({ true, false }) do
+        for _, flagsUpFirst in ipairs({ true, false }) do
+            local test, calls = setup(), 0
+            test.bind(name, function() calls = calls + 1 end)
+            local function send(first, a, b, flags, raw)
+                test.send(first and a or b, left, flags, raw)
+                test.send(first and b or a, left, flags, raw)
+            end
+            send(flagsFirst, "flagsChanged", "keyDown", { [name] = true }, leftMask)
+            send(flagsUpFirst, "flagsChanged", "keyUp", {}, 0)
+            assert(calls == 1, "混合通知只能触发一次：" .. name)
+        end
+    end
+
+    -- 左右交叠后不能遗留锁定；按住右键时的左键也不算单按。
+    for _, remote in ipairs({ false, true }) do
+        local test, calls = setup(), 0
+        test.bind(name, function() calls = calls + 1 end)
+        local flags = { [name] = true }
+        if remote then
+            test.send("flagsChanged", right, flags, rightMask)
+            test.send("keyDown", left, flags, leftMask + rightMask)
+            test.send("keyUp", left, flags, rightMask)
+        else
+            test.send("flagsChanged", left, flags, leftMask)
+            test.send("flagsChanged", right, flags, leftMask + rightMask)
+            test.send("flagsChanged", left, flags, rightMask)
+        end
+        test.send("flagsChanged", right, {}, 0)
+        assert(calls == 0, "左右同时使用不能触发单按：" .. name)
+        test.send("flagsChanged", left, flags, leftMask)
+        test.send("flagsChanged", left, {}, 0)
+        assert(calls == 1, "左右交叠后必须恢复单按：" .. name)
+    end
+end
+
+-- 回调异常必须上报，但不能逸出监听器、吞掉修饰键松开或污染下一次触发。
+for _, source in ipairs({ "alt", "e" }) do
+    local test, calls = setup(), 0
+    test.bind(source, function()
+        calls = calls + 1
+        if calls == 1 then error("模拟动作失败") end
+    end)
+    local single = source == "alt"
+    for _ = 1, 2 do
+        assert(test.send(single and "flagsChanged" or "keyDown", single and 58 or 14,
+            single and { alt = true } or {}, single and masks.deviceLeftAlternate or 0) == not single)
+        assert(test.send(single and "flagsChanged" or "keyUp", single and 58 or 14) == not single)
+    end
+    assert(calls == 2 and #test.errors == 1)
+    assert(test.errors[1]:find("模拟动作失败", 1, true), "必须保留错误信息及堆栈")
 end
 print("keymapping: 边界回归测试通过")

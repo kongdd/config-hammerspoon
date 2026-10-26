@@ -7,6 +7,17 @@ local synthetic = 0x4B4D4150 -- 标记合成事件，防止循环映射。
 local unpack = table.unpack or unpack
 local eventAPI = hs.eventtap.event
 local types, sourceProperty = eventAPI.types, eventAPI.properties.eventSourceUserData
+local masks = eventAPI.rawFlagMasks
+local modifierKeys = {
+    [55] = { name = "cmd", mask = masks.deviceLeftCommand, other = 54 },
+    [54] = { name = "cmd", mask = masks.deviceRightCommand, other = 55 },
+    [56] = { name = "shift", mask = masks.deviceLeftShift, other = 60 },
+    [60] = { name = "shift", mask = masks.deviceRightShift, other = 56 },
+    [58] = { name = "alt", mask = masks.deviceLeftAlternate, other = 61 },
+    [61] = { name = "alt", mask = masks.deviceRightAlternate, other = 58 },
+    [59] = { name = "ctrl", mask = masks.deviceLeftControl, other = 62 },
+    [62] = { name = "ctrl", mask = masks.deviceRightControl, other = 59 },
+}
 local keyEvents = { types.keyDown, types.keyUp }
 local modifierEvents = {
     types.flagsChanged, types.keyDown, types.keyUp,
@@ -54,17 +65,41 @@ local function inApp(options)
     return true
 end
 
--- 忽略合成事件；首次按下更新版本，重复通知不重复计数。
+-- 兼容 Lua / LuaJIT，不依赖特定位运算语法。
+local function hasFlag(raw, mask)
+    return math.floor(raw / mask) % 2 == 1
+end
+
+-- 实体键按设备级标志区分左右；远程事件可能只有合并后的修饰键标志。
+local function modifierState(event, modifier, flags)
+    local raw = event:rawFlags()
+    local down = hasFlag(raw, modifier.mask)
+    local other = hasFlag(raw, modifierKeys[modifier.other].mask)
+    if down or other then return down, other end
+    if event:getType() == types.flagsChanged and not flags[modifier.name] then return false, false end
+    return not not flags[modifier.name] -- 未提供左右标志时，不猜测另一侧的状态。
+end
+
+-- 只在真正从松开变为按下时计数，混合通知及多个监听器均幂等。
+local function trackKey(code, down)
+    if down and not heldKeys[code] then inputVersion = inputVersion + 1 end
+    heldKeys[code] = down or nil
+end
+
 local function readInput(event)
     if event:getProperty(sourceProperty) == synthetic then return end
-    local kind, code = event:getType(), event:getKeyCode()
-    if kind == types.keyDown and not heldKeys[code] then
-        inputVersion = inputVersion + 1
-        heldKeys[code] = true
-    elseif kind == types.keyUp then
-        heldKeys[code] = nil
+    local kind, code, flags = event:getType(), event:getKeyCode(), event:getFlags()
+    local keyboard = kind == types.keyDown or kind == types.keyUp or kind == types.flagsChanged
+    if not keyboard then return kind, code, flags, false end
+    local down = kind == types.keyDown
+    local modifier = modifierKeys[code]
+    if modifier then
+        local physical, other = modifierState(event, modifier, flags)
+        if kind == types.flagsChanged then down = physical end
+        if other ~= nil then trackKey(modifier.other, other) end
     end
-    return kind, code, event:getFlags()
+    trackKey(code, down)
+    return kind, code, flags, down
 end
 
 local function matches(source, kind, code, flags)
@@ -82,22 +117,23 @@ local function matches(source, kind, code, flags)
     return flags:containExactly(source.modifiers)
 end
 
+-- 动作异常须保留堆栈并上报，不能逸出原生监听器而吞掉松键事件。
+local function perform(action)
+    local ok, err = xpcall(action, debug.traceback)
+    if not ok then hs.showError(err) end
+end
+
 -- 管理一次按下到松开的状态，普通键拦截，修饰键放行。
 local function makeHandler(source, action, options)
     local pending -- nil：未按下；false：未匹配；table：已匹配，等待松键。
     return function(event)
-        local kind, code, flags = readInput(event)
+        local kind, code, flags, down = readInput(event)
         if not kind or (not source.single and code ~= source.code) then return false end
-        -- 实体修饰键用 flagsChanged，远程输入也可能使用 keyDown/keyUp。
-        local down = kind == types.keyDown or (kind == types.flagsChanged and flags[source.key])
         local allowed = inApp(options)
         local valid = allowed and matches(source, kind, code, flags)
         if source.single and not valid then
-            if code == source.code and not down then
-                pending = nil
-            elseif pending ~= nil or code == source.code then
-                pending = false -- 取消后锁定，直到该修饰键真正松开。
-            end
+            pending = nil
+            if heldKeys[source.code] then pending = false end -- 松开前保持取消状态。
             return false
         end
         if down then
@@ -112,7 +148,7 @@ local function makeHandler(source, action, options)
         pending = nil
         if press and allowed and (not source.single or (press.version == inputVersion
             and hs.timer.secondsSinceEpoch() - press.time <= (options.timeout or 1))) then
-            action()
+            perform(action)
         end
         return not source.single and not not press
     end

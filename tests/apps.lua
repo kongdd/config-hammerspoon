@@ -17,7 +17,11 @@ hs = {
         end,
     },
     eventtap = {
-        event = { types = types, properties = { eventSourceUserData = 1 } },
+        event = {
+            types = types,
+            properties = { eventSourceUserData = 1 },
+            rawFlagMasks = require("tests.helpers.keyflags"),
+        },
         new = function(events, fn)
             assert(#events == 7)
             callback = fn
@@ -41,6 +45,7 @@ local function send(kind, code, flags)
     assert(callback({
         getType = function() return types[kind] end,
         getProperty = function() return 0 end,
+        rawFlags = function() return 0 end,
         getKeyCode = function() return code or 58 end,
         getFlags = function() return setmetatable(flags or {}, { __index = flagMethods }) end,
     }) == false, "所有事件必须放行")

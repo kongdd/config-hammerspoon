@@ -12,6 +12,7 @@ hs = {
         event = {
             types = { keyDown = 1, keyUp = 2 },
             properties = { eventSourceUserData = 1 },
+            rawFlagMasks = require("tests.helpers.keyflags"),
             newKeyEvent = function(modifiers, key, down)
                 assert(#modifiers == 1 and modifiers[1] == "cmd" and key == "delete")
                 return {

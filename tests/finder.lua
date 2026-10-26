@@ -1,11 +1,12 @@
 -- luajit tests/finder.lua；检查 init.lua 注册，不操作真实应用。
-local mappings, calls = {}, 0
+local mappings, calls, desktopToggles = {}, 0, 0
 hs = {
     execute = function(command)
         assert(command == "/usr/bin/open ~")
         calls = calls + 1
     end,
     application = { launchOrFocus = function() error("注册时不得打开应用") end },
+    spaces = { toggleShowDesktop = function() desktopToggles = desktopToggles + 1 end },
 }
 package.loaded.powerpoint = {}
 package.loaded.minimize = {}
@@ -14,7 +15,12 @@ package.loaded.keymapping = function(from, to, options)
     mappings[from] = { action = to, options = options }
 end
 dofile(os.getenv("HOME") .. "/.hammerspoon/init.lua")
-assert(calls == 0)
+assert(calls == 0 and desktopToggles == 0)
+local desktop = mappings["alt+d"]
+assert(desktop.action == hs.spaces.toggleShowDesktop and desktop.options == nil)
+desktop.action()
+desktop.action()
+assert(desktopToggles == 2)
 local home, trash, apps = mappings["alt+e"], mappings.del, mappings.alt
 assert(home.action == hs.execute)
 home.action(home.options.args[1])
