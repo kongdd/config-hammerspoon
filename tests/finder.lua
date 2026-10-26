@@ -23,4 +23,23 @@ assert(trash.action == "cmd+backspace" and trash.options == "com.apple.finder")
 assert(apps.action == hs.application.launchOrFocus)
 assert(apps.options.args[1] == "/System/Applications/Apps.app")
 assert(apps.options.bundleID_excluded[1] == "com.microsoft.rdc.macos")
+-- F11 仅注册到 Windows App；切换全屏，无窗口时安全返回。
+local fullscreen, toggles = true, 0
+local window = {
+    isFullScreen = function() return fullscreen end,
+    setFullScreen = function(_, value)
+        assert(value == not fullscreen)
+        fullscreen, toggles = value, toggles + 1
+    end,
+}
+hs.window = { focusedWindow = function() return window end }
+local remote = mappings.f11
+assert(remote.options == "com.microsoft.rdc.macos")
+remote.action()
+assert(not fullscreen and toggles == 1)
+remote.action()
+assert(fullscreen and toggles == 2)
+window = nil
+remote.action()
+assert(toggles == 2)
 print("finder / init: 注册测试通过（未操作真实应用）")
