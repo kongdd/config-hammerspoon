@@ -10,7 +10,7 @@ local commands = {
     ["左对齐"] = "align lefts", ["右对齐"] = "align rights",
     ["居中"] = "align centers", ["垂直居中"] = "align middles",
 }
-local pending -- 待执行动作：普通键、修饰键均松开后再执行
+local pending -- 对齐等普通键松开；裁剪还需等修饰键松开
 local swallowed = {} -- 配对拦截普通键；修饰键事件始终放行
 
 -- 原生选择检查与对齐合并调用，避免遍历 AX 菜单和等待菜单动画。
@@ -32,23 +32,16 @@ local function shapeAction(command)
     return ok and applied == true
 end
 
--- 只读 AX 焦点，不查询菜单、不运行 AppleScript，可用于按键回调。
+-- 只检查当前焦点，不回溯父节点；执行前再用 PPT 原生选择类型确认。
 local function objectFocus()
     local focus = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
-    for _ = 1, 12 do
-        if not focus then return true end -- PPT 有时不提供 AX 焦点，稍后用原生选择类型确认。
-        local role = focus:attributeValue("AXRole")
-        if not role then return false end
-        -- 画布即使选中形状，也会暴露空 AXSelectedTextRange。
-        if role == "AXLayoutArea" or role == "AXWindow" or role == "AXApplication" then return true end
-        if role == "AXTextField" or role == "AXTextArea" or role == "AXComboBox"
-            or role == "AXSearchField" or role == "AXEditableText"
-            or focus:attributeValue("AXEditable") == true
-            or focus:attributeValue("AXSelectedTextRange") ~= nil
-            or focus:attributeValue("AXInsertionPointLineNumber") ~= nil then return false end
-        focus = focus:attributeValue("AXParent")
-    end
-    return false
+    if not focus then return true end -- PPT 有时不提供 AX 焦点。
+    local role = focus:attributeValue("AXRole")
+    if role == "AXLayoutArea" then return true end -- 画布也可能暴露空文本选区。
+    return (role == "AXScrollArea" or role == "AXWindow" or role == "AXApplication")
+        and focus:attributeValue("AXEditable") ~= true
+        and focus:attributeValue("AXSelectedTextRange") == nil
+        and focus:attributeValue("AXInsertionPointLineNumber") == nil
 end
 
 -- 执行前确认窗口与焦点；裁剪额外检查菜单状态及原生选择类型。
@@ -68,27 +61,28 @@ local function target(path)
     if ok then return result end
 end
 
-local function modifiersDown(flags)
+local function modifiersDown(flags, allowCtrl)
     flags = flags or hs.eventtap.checkKeyboardModifiers(true)
-    return flags.ctrl or flags.alt or flags.cmd or flags.shift
+    return flags.alt or flags.cmd or flags.shift or (flags.ctrl and not allowCtrl)
 end
 
 local function queue(flags)
     if M.timer then M.timer:stop(); M.timer = nil end
-    if not pending or not pending.released or modifiersDown(flags) then return end
+    if not pending or not pending.released then return end
+    local command = commands[pending.path[3]]
+    if modifiersDown(flags, command) then return end
     -- 回调内以事件标志为准：实体键松开时，系统轮询状态可能尚未更新。
-    -- 让原始松键事件先送达 PPT；裁剪菜单会独占事件循环，保留较长延时。
+    -- 原生对齐允许继续按住 Ctrl；裁剪菜单会独占事件循环，须等全部松键。
     M.status = "已排队"
-    M.timer = hs.timer.doAfter(commands[pending.path[3]] and 0.03 or 0.15, function()
+    M.timer = hs.timer.doAfter(command and 0.03 or 0.15, function()
         M.timer = nil
-        if modifiersDown() then M.status = "修饰键仍按下"; return end
+        if modifiersDown(nil, command) then M.status = "修饰键仍按下"; return end
         local action = pending
         pending = nil
         if not action or not action.released then return end
         local now = target(action.path)
-        -- AX / AppleScript 查询期间可能又按下了修饰键。
-        if now and now.windowID == action.windowID and not modifiersDown() then
-            local command = commands[action.path[3]]
+        -- 查询期间可能又按下其他修饰键；只有原生对齐允许保留 Ctrl。
+        if now and now.windowID == action.windowID and not modifiersDown(nil, command) then
             local applied
             if command then
                 applied = shapeAction(command)

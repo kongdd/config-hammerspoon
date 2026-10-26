@@ -1,5 +1,5 @@
 -- 在 Hammerspoon 中运行：dofile(hs.configdir .. "/tests/powerpoint-ui.lua")
--- 新建临时演示文稿测试六种对齐及裁剪，结束后关闭，不修改已有文件。
+-- 临时文稿测试按住 Ctrl 连续对齐、松开 Option 才裁剪；结束后关闭，不修改已有文件。
 local app = hs.application.get("com.microsoft.Powerpoint")
 assert(app and powerpoint and powerpoint.keyTap:isEnabled(), "请先启用 PPT 快捷键")
 assert(not next(hs.eventtap.checkKeyboardModifiers()), "请先松开所有修饰键")
@@ -32,7 +32,13 @@ hs.osascript.applescript = function(script, ...)
     end
     return ok, result, err
 end
+local function releaseModifier()
+    if not state.heldModifier then return end
+    hs.eventtap.event.newKeyEvent(state.heldModifier, false):setFlags({}):post()
+    state.heldModifier = nil
+end
 local function finish(err)
+    releaseModifier()
     state.error, state.done = err, true
     if selectMenuItem then methods.selectMenuItem = selectMenuItem end
     hs.osascript.applescript = appleScript
@@ -40,13 +46,19 @@ local function finish(err)
     hs.osascript.applescript('tell application "Microsoft PowerPoint" to close presentation "' .. name .. '" saving no')
     if original then original:activate() end
 end
-local function stroke(modifier, key)
+local function stroke(modifier, key, hold)
     state.started = hs.timer.absoluteTime()
     local event = hs.eventtap.event
-    event.newKeyEvent({}, modifier, true):post()
-    event.newKeyEvent({ modifier }, key, true):post()
-    event.newKeyEvent({ modifier }, key, false):post()
-    event.newKeyEvent({}, modifier, false):post()
+    local flags = { [modifier] = true }
+    -- 短形式保留已按下的修饰键；给普通键传 modifiers 表会隐式释放它们。
+    if state.heldModifier ~= modifier then event.newKeyEvent(modifier, true):setFlags(flags):post() end
+    event.newKeyEvent(key, true):setFlags(flags):post()
+    event.newKeyEvent(key, false):setFlags(flags):post()
+    if hold then
+        state.heldModifier = modifier
+    else
+        event.newKeyEvent(modifier, false):setFlags({}):post()
+    end
 end
 local function crop()
     local image = hs.image.imageFromPath(hs.configdir .. "/images/powerpoint-test.png")
@@ -64,18 +76,26 @@ local function crop()
             end
             return result
         end
-        stroke("alt", "c")
-        state.timer = hs.timer.doAfter(0.6, function()
-            state.results[#state.results + 1] = {
-                key = "alt+c", passed = state.cropClicked == true, latencyMs = state.latencyMs,
-            }
-            finish()
+        stroke("alt", "c", true)
+        state.timer = hs.timer.doAfter(0.3, function()
+            if state.cropClicked then finish("Option 未松开就触发了裁剪"); return end
+            releaseModifier()
+            state.timer = hs.timer.doAfter(0.6, function()
+                state.results[#state.results + 1] = {
+                    key = "alt+c", passed = state.cropClicked == true, latencyMs = state.latencyMs,
+                }
+                finish()
+            end)
         end)
     end)
 end
 local function run(index)
     local case = cases[index]
-    if not case then crop(); return end
+    if not case then
+        releaseModifier()
+        state.timer = hs.timer.doAfter(0.1, crop)
+        return
+    end
     local success, _, err = hs.osascript.applescript(scope .. [[
         set left position of shape "HS-test-A" to 100
         set top of shape "HS-test-A" to 100
@@ -98,8 +118,8 @@ local function run(index)
         state.menu = app:findMenuItem({ "排列", "对齐或分散", "左对齐" })
         local focus = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
         state.focus = focus and focus:attributeValue("AXRole")
-        -- 显式发送修饰键及其松开事件，不能只给方向键加 Ctrl 标志。
-        stroke("ctrl", case[1])
+        -- 首次显式按下 Ctrl，此后一直按住，六次对齐均在 Ctrl 松开前验证。
+        stroke("ctrl", case[1], true)
         state.timer = hs.timer.doAfter(0.6, function()
             local success, positions, err = hs.osascript.applescript(scope .. [[
                 return {{left position, top, width, height} of shape "HS-test-A", {left position, top, width, height} of shape "HS-test-B"}
@@ -112,8 +132,8 @@ local function run(index)
             state.results[#state.results + 1] = {
                 key = case[1], passed = passed, positions = positions, latencyMs = state.latencyMs,
             }
-            if hs.eventtap.checkKeyboardModifiers().ctrl then
-                finish("Ctrl 状态异常"); return
+            if not hs.eventtap.checkKeyboardModifiers().ctrl then
+                finish("测试期间 Ctrl 提前松开"); return
             end
             run(index + 1)
         end)

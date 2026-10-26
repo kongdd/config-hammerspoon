@@ -15,7 +15,10 @@ local function check(value)
     assert(value, "检查失败：" .. checks)
 end
 local function node(attributes)
-    return { attributeValue = function(_, key) return attributes[key] end }
+    return { attributeValue = function(_, key)
+        assert(key ~= "AXParent", "焦点检查不应回溯父节点")
+        return attributes[key]
+    end }
 end
 local function canvas() return node({ AXRole = "AXLayoutArea" }) end
 local app = {
@@ -115,10 +118,11 @@ end
 check(m.keyTap.running)
 check(press("left", nil, true))
 check(#clicks == 0)
-modifiers = { ctrl = true }; check(release() and not m.timer)
-modifiers = {}; check(not release(types.flagsChanged) and m.timer ~= nil)
+modifiers = { ctrl = true }; check(release() and m.timer ~= nil)
 check(m.timer.delay == 0.03)
 fire(); check(#clicks == 1 and clicks[1] == "左对齐" and m.timer == nil)
+modifiers = {}; check(not release(types.flagsChanged) and not m.timer)
+fire(); check(#clicks == 1) -- Ctrl 松开不应重复执行。
 -- 新快捷键取消旧定时器，须等最新按键松开。
 check(press("left")); release()
 local queued = m.timer
@@ -143,20 +147,23 @@ local base = #clicks
 selected = false
 check(press("left")); release(); fire(); check(#clicks == base)
 selected = true
-for _, role in ipairs({ "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXEditableText" }) do
+for _, role in ipairs({
+    "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXEditableText",
+    "AXStaticText", "AXGroup", "AXUnknown",
+}) do
     focus = node({ AXRole = role }); check(press("m", nil, false)); release(); fire()
     check(#clicks == base)
 end
 for _, attribute in ipairs({ "AXEditable", "AXSelectedTextRange", "AXInsertionPointLineNumber" }) do
-    focus = node({ AXRole = "AXGroup", [attribute] = attribute == "AXEditable" and true or 0 })
+    focus = node({ AXRole = "AXScrollArea", [attribute] = attribute == "AXEditable" and true or 0 })
     check(press("e", nil, false)); release(); fire(); check(#clicks == base)
 end
 focus = node({ AXRole = "AXStaticText", AXParent = node({ AXRole = "AXTextArea" }) })
 check(press("left")); release(); fire(); check(#clicks == base)
--- PPT 的真实行为：焦点为空，或画布带空文本选区；两者均需原生选择类型确认。
-for _, missingFocus in ipairs({ true, false }) do
-    focus = not missingFocus and node({
-        AXRole = "AXLayoutArea", AXSelectedTextRange = { location = 0, length = 0 },
+-- 空焦点和非文本界面均需原生选择类型确认；画布带空文本选区也应允许。
+for _, role in ipairs({ "missing", "AXLayoutArea", "AXScrollArea", "AXWindow", "AXApplication" }) do
+    focus = role ~= "missing" and node({
+        AXRole = role, AXSelectedTextRange = role == "AXLayoutArea" and { location = 0, length = 0 } or nil,
     }) or nil
     check(press("left")); release(); fire()
     check(#clicks == base + 1 and clicks[#clicks] == "左对齐")
@@ -199,22 +206,35 @@ check(press("left"))
 modifiers = {}; check(not release(types.flagsChanged) and not m.timer)
 release(); fire(); check(#clicks == base + 1)
 base = #clicks
--- 新修饰键按下须取消排队，松开后重新等待。
+-- 按住 Ctrl 连续对齐：每次普通键松开即执行，不必松开 Ctrl。
+modifiers = { ctrl = true }
+for _, key in ipairs({ "left", "e", "m", "right", "up", "down" }) do
+    check(press(key, nil, true)); check(not m.timer)
+    release(); check(m.timer ~= nil)
+    fire(); base = base + 1; check(#clicks == base and m.status == "已执行")
+end
+modifiers = {}; release(types.flagsChanged); fire(); check(#clicks == base)
+-- 其他修饰键按下须取消排队，松开后重新等待。
 check(press("left")); release()
 local queued = m.timer
-modifiers = { ctrl = true }; release(types.flagsChanged)
+modifiers = { alt = true }; release(types.flagsChanged)
 check(queued.stopped and not m.timer)
 queued:fire(); check(#clicks == base)
 modifiers = {}; release(types.flagsChanged); fire(); check(#clicks == base + 1)
 base = #clicks
--- 即使物理状态先更新、flagsChanged 尚未处理，也不能打开菜单。
+-- 即使物理状态先更新、flagsChanged 尚未处理，也不能在按着 Option 时执行。
 check(press("left")); release()
-modifiers = { ctrl = true }; fire(); check(#clicks == base)
+modifiers = { alt = true }; fire(); check(#clicks == base)
 modifiers = {}; release(types.flagsChanged); fire(); check(#clicks == base + 1)
 base = #clicks
--- 实体键松开：事件已无 Ctrl 标志，系统轮询值却要等回调返回后才更新。
-check(press("left"))
-modifiers = { ctrl = true }; release(); check(not m.timer)
+-- 裁剪仍须等 Option 松开；回调使用事件标志，不能依赖尚未更新的系统轮询值。
+check(press("c", { alt = true }))
+modifiers = { alt = true }; release(); check(not m.timer)
+fire(); check(#clicks == base)
 release(types.flagsChanged, nil, {}); check(m.timer ~= nil)
-modifiers = {}; fire(); check(#clicks == base + 1 and m.status == "已执行")
+modifiers = {}; fire(); check(#clicks == base + 1 and clicks[#clicks] == "裁剪")
+-- 裁剪排队后重新按下 Ctrl，同样不得打开菜单。
+check(press("c", { alt = true })); release()
+modifiers = { ctrl = true }; fire(); check(#clicks == base + 1)
+modifiers = {}; release(types.flagsChanged); fire(); check(#clicks == base + 2)
 print("PASS: " .. checks .. " checks (mocked Hammerspoon; real PPT UI not tested)")
