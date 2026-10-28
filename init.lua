@@ -1,6 +1,7 @@
 -- require("hs.ipc") -- 临时诊断接口。
 powerpoint = require("powerpoint")
 minimize = require("minimize")
+require("chrome")
 
 
 local keymapping = require("keymapping")
@@ -18,13 +19,37 @@ keymapping("alt", hs.application.launchOrFocus, {
 -- Option + D：显示桌面，再按一次恢复窗口。
 keymapping("alt+d", hs.spaces.toggleShowDesktop)
 
+-- Option + Left/Right：窗口占据屏幕左半或右半。
+for _, direction in ipairs({ "left", "right" }) do
+    keymapping("alt+" .. direction, function()
+        local window = hs.window.focusedWindow()
+        if not window then return end
+        local frame = window:screen():frame()
+        frame.w = frame.w / 2
+        if direction == "right" then frame.x = frame.x + frame.w end
+        window:setFrame(frame)
+    end)
+end
+
+-- Shift + Option + Left/Right：将窗口移到相邻屏幕。
+for key, method in pairs({ left = "toWest", right = "toEast" }) do
+    keymapping("shift+alt+" .. key, function()
+        local window = hs.window.focusedWindow()
+        if not window then return end
+        local screen = window:screen()
+        local target = screen[method](screen)
+        if target then window:moveToScreen(target) end
+    end)
+end
+
+-- Option + Enter：最大化窗口，保留菜单栏和 Dock。
+keymapping("alt+return", function()
+    local window = hs.window.focusedWindow()
+    if window then window:setFrame(window:screen():frame()) end
+end)
+
 -- Del: Finder Cmd+Backspace（移到废纸篓）。
 keymapping("del", "cmd+backspace", "com.apple.finder")
-
--- !Chrome shortcuts
-keymapping("f5", "cmd+r", "com.google.Chrome")
--- keymapping("cmd+h", "cmd+y", "com.google.Chrome")  -- 可能被系统占用, not work
-keymapping("cmd+j", "cmd+shift+j", "com.google.Chrome")
 
 -- !Windows App 远程窗口的全屏状态。
 keymapping("f11", function()

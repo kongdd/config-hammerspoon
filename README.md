@@ -13,8 +13,13 @@
 - cmd + m：最小化当前窗口；再按一次恢复并聚焦该窗口（即使焦点已切换）。
 - Chrome 中按 F5：映射为 Cmd+R，刷新页面。
 - Chrome 中按 Cmd+J：映射为 Cmd+Shift+J，打开下载内容。
+- Chrome 中按 Ctrl+V：切换画中画，再按一次恢复；优先选择正在播放的视频。
+- Chrome 中选中文本后按 Control+Option+G：用 Google 搜索（会覆盖剪贴板）。
 - Windows App 中按 F11：切换远程窗口全屏，再按一次恢复。
 - option + d：显示系统桌面，再按一次恢复之前的窗口。
+- option + left/right：将当前窗口放置于屏幕左半/右半。
+- option + enter：最大化当前窗口，保留菜单栏和 Dock。
+- shift + option + left/right：将当前窗口移到左侧/右侧屏幕。
 
 ## PowerPoint
 
