@@ -8,7 +8,7 @@ local keymapping = require("keymapping")
 
 -- !系统设置
 -- Option + E：Finder Open Home
-keymapping("alt+e", hs.execute, { args = { "/usr/bin/open ~" } })
+hs.hotkey.bind({ "alt" }, "e", function() hs.execute("/usr/bin/open ~") end)
 
 -- Option: open apps，exclude `Windows App`
 keymapping("alt", hs.application.launchOrFocus, {
@@ -17,11 +17,11 @@ keymapping("alt", hs.application.launchOrFocus, {
 })
 
 -- Option + D：显示桌面，再按一次恢复窗口。
-keymapping("alt+d", hs.spaces.toggleShowDesktop)
+hs.hotkey.bind({ "alt" }, "d", hs.spaces.toggleShowDesktop)
 
 -- Option + Left/Right：窗口占据屏幕左半或右半。
 for _, direction in ipairs({ "left", "right" }) do
-    keymapping("alt+" .. direction, function()
+    hs.hotkey.bind({ "alt" }, direction, function()
         local window = hs.window.focusedWindow()
         if not window then return end
         local frame = window:screen():frame()
@@ -33,7 +33,7 @@ end
 
 -- Shift + Option + Left/Right：将窗口移到相邻屏幕。
 for key, method in pairs({ left = "toWest", right = "toEast" }) do
-    keymapping("shift+alt+" .. key, function()
+    hs.hotkey.bind({ "shift", "alt" }, key, function()
         local window = hs.window.focusedWindow()
         if not window then return end
         local screen = window:screen()
@@ -43,7 +43,7 @@ for key, method in pairs({ left = "toWest", right = "toEast" }) do
 end
 
 -- Option + Enter：最大化窗口，保留菜单栏和 Dock。
-keymapping("alt+return", function()
+hs.hotkey.bind({ "alt" }, "return", function()
     local window = hs.window.focusedWindow()
     if window then window:setFrame(window:screen():frame()) end
 end)
