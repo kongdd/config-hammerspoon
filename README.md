@@ -7,8 +7,8 @@
 
 ## 窗口
 
-- `finder.lua`：option + e 在 Finder 中打开主目录 `~`。
-- Finder 中单按 Del，松键时映射为 Cmd+Backspace（移到废纸篓）。
+- Option + E 在 Finder 中打开主目录 `~`。
+- Finder 中单按 Del 移到废纸篓，按 F2 重命名。
 - 普通全局快捷键使用 `hs.hotkey.bind`；单按修饰键及应用专属映射使用 `keymapping.lua`。`options` 支持 `bundleID`、`bundleID_excluded` 列表和单按超时 `timeout`。
 - cmd + m：最小化当前窗口；再按一次恢复并聚焦该窗口（即使焦点已切换）。
 - Chrome 中按 F5：映射为 Cmd+R，刷新页面。

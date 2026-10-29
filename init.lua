@@ -48,8 +48,9 @@ hs.hotkey.bind({ "alt" }, "return", function()
     if window then window:setFrame(window:screen():frame()) end
 end)
 
--- Del: Finder Cmd+Backspace（移到废纸篓）。
+-- Finder：Del 移到废纸篓，F2 重命名。
 keymapping("del", "cmd+backspace", "com.apple.finder")
+keymapping("f2", "return", "com.apple.finder")
 
 -- !Windows App 远程窗口的全屏状态。
 keymapping("f11", function()
