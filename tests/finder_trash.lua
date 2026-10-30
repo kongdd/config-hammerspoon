@@ -10,7 +10,7 @@ local function send(flags, expected, code)
     assert(#test.posted == before, "按下时不得执行目标动作")
     assert(test.send("keyUp", code or 117, flags) == expected)
     test.flush()
-    assert(#test.posted - before == (expected and 2 or 0))
+    assert(#test.posted - before == (expected and 3 or 0))
     if not expected then return end
     for offset = 1, 2 do
         local event = test.posted[before + offset]
@@ -18,6 +18,10 @@ local function send(flags, expected, code)
         assert(event:getKeyCode() == 51 and event:getFlags():containExactly({ "cmd" }))
         assert(event:getProperty(property) == 0x4B4D4150, "合成按键必须携带标记")
     end
+    local release = test.posted[before + 3]
+    assert(release:getType() == types.keyUp and release:getKeyCode() == 55)
+    assert(release:getFlags():containExactly({}))
+    assert(release:getProperty(property) == 0x4B4D4150)
 end
 
 send({}, true)
@@ -32,5 +36,5 @@ test.front = "com.apple.Safari"
 send({}, false)
 test.front = nil
 send({}, false)
-assert(#test.posted == 6 and #test.errors == 0)
+assert(#test.posted == 9 and #test.errors == 0)
 print("finder_trash: Finder Del 测试通过（未操作真实文件）")

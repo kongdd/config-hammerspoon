@@ -46,10 +46,18 @@ local function makeAction(to, args)
     end
     assert(type(to) == "string", "目标必须是快捷键或函数")
     local target = parse(to)
-    return function()
+    return function(flags)
         for _, down in ipairs({ true, false }) do
             eventAPI.newKeyEvent(target.modifiers, target.key, down)
                 :setProperty(sourceProperty, synthetic):post()
+        end
+        -- 主键松开仍带目标修饰标志；显式释放合成修饰键，保留真实按住的键。
+        for i = #target.modifiers, 1, -1 do
+            local modifier = target.modifiers[i]
+            if not flags[modifier] then
+                eventAPI.newKeyEvent({}, modifier, false):setFlags(flags)
+                    :setProperty(sourceProperty, synthetic):post()
+            end
         end
     end
 end
@@ -118,8 +126,8 @@ local function matches(source, kind, code, flags)
 end
 
 -- 动作异常须保留堆栈并上报，不能逸出原生监听器而吞掉松键事件。
-local function perform(action)
-    local ok, err = xpcall(action, debug.traceback)
+local function perform(action, flags)
+    local ok, err = xpcall(action, debug.traceback, flags)
     if not ok then hs.showError(err) end
 end
 
@@ -148,7 +156,7 @@ local function makeHandler(source, action, options)
         pending = nil
         if press and allowed and (not source.single or (press.version == inputVersion
             and hs.timer.secondsSinceEpoch() - press.time <= (options.timeout or 1))) then
-            perform(action)
+            perform(action, flags)
         end
         return not source.single and not not press
     end

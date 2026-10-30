@@ -18,7 +18,7 @@ do
     test.bind("backspace", "cmd+delete")
     stroke(test, 51, {}, true)
     test.flush()
-    assert(#test.posted == 4 and #test.errors == 0)
+    assert(#test.posted == 6 and #test.errors == 0)
     assert(not pcall(test.bind, "invalid+e", "cmd+delete"))
     assert(not pcall(test.bind, "unknown", "cmd+delete"))
     assert(not pcall(test.bind, "e", "cmd+unknown"))

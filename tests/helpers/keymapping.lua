@@ -5,7 +5,7 @@ return function()
         leftMouseDown = 4, rightMouseDown = 5, otherMouseDown = 6, scrollWheel = 7,
     }
     local map = {
-        a = 0, b = 11, e = 14, delete = 51, forwarddelete = 117,
+        a = 0, b = 11, e = 14, r = 15, f5 = 96, delete = 51, forwarddelete = 117,
         cmd = 55, shift = 56, alt = 58, ctrl = 59,
     }
     local taps = setmetatable({}, { __mode = "v" }) -- 不替生产模块持有监听器，保留 GC 测试意义。
@@ -35,6 +35,11 @@ return function()
                 local copy = {}
                 for key, value in pairs(flags or {}) do copy[key] = value end
                 return setmetatable(copy, { __index = methods })
+            end,
+            setFlags = function(self, value)
+                flags = {}
+                for key, enabled in pairs(value) do flags[key] = enabled end
+                return self
             end,
             setProperty = function(self, property, value)
                 properties[property] = value
